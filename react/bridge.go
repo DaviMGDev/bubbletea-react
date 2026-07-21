@@ -86,14 +86,14 @@ func (m *rootModel) handleKeyMsg(msg tea.KeyMsg) {
 		return
 	}
 
-	// Tab / ShiftTab always navigate focus (never routed to elements)
+	// Navigation keys — Tab, ShiftTab, Up, Down all move focus
 	switch msg.Type {
-	case tea.KeyTab:
+	case tea.KeyTab, tea.KeyDown:
 		m.prevFocus = m.focusIndex
 		m.focusIndex = (m.focusIndex + 1) % len(m.interactives)
 		m.fireFocusBlur()
 		return
-	case tea.KeyShiftTab:
+	case tea.KeyShiftTab, tea.KeyUp:
 		m.prevFocus = m.focusIndex
 		m.focusIndex = (m.focusIndex - 1 + len(m.interactives)) % len(m.interactives)
 		m.fireFocusBlur()
@@ -106,7 +106,6 @@ func (m *rootModel) handleKeyMsg(msg tea.KeyMsg) {
 
 	// Route key to focused element
 	entry := m.interactives[m.focusIndex]
-	consumed := false
 
 	switch entry.Type {
 	case "button":
@@ -114,7 +113,6 @@ func (m *rootModel) handleKeyMsg(msg tea.KeyMsg) {
 		case tea.KeyEnter, tea.KeySpace:
 			if entry.OnClick != nil {
 				entry.OnClick()
-				consumed = true
 			}
 		}
 
@@ -124,19 +122,16 @@ func (m *rootModel) handleKeyMsg(msg tea.KeyMsg) {
 			if entry.OnChange != nil {
 				newValue := entry.Value + string(msg.Runes)
 				entry.OnChange(newValue)
-				consumed = true
 			}
 		case tea.KeySpace:
 			if entry.OnChange != nil {
 				newValue := entry.Value + " "
 				entry.OnChange(newValue)
-				consumed = true
 			}
 		case tea.KeyBackspace:
 			if entry.OnChange != nil && len(entry.Value) > 0 {
 				newValue := entry.Value[:len(entry.Value)-1]
 				entry.OnChange(newValue)
-				consumed = true
 			}
 		}
 
@@ -145,24 +140,21 @@ func (m *rootModel) handleKeyMsg(msg tea.KeyMsg) {
 		case tea.KeyEnter, tea.KeySpace:
 			if entry.OnToggle != nil {
 				entry.OnToggle(!entry.Checked)
-				consumed = true
 			}
 		}
 
 	case "select":
 		if entry.OptionCount > 0 && len(entry.OptionValues) > 0 {
 			switch msg.Type {
-			case tea.KeyRight, tea.KeyDown:
+			case tea.KeyRight:
 				newIdx := (entry.SelectedIndex + 1) % entry.OptionCount
 				if newIdx >= 0 && newIdx < len(entry.OptionValues) && entry.OnChange != nil {
 					entry.OnChange(entry.OptionValues[newIdx])
-					consumed = true
 				}
-			case tea.KeyLeft, tea.KeyUp:
+			case tea.KeyLeft:
 				newIdx := (entry.SelectedIndex - 1 + entry.OptionCount) % entry.OptionCount
 				if newIdx >= 0 && newIdx < len(entry.OptionValues) && entry.OnChange != nil {
 					entry.OnChange(entry.OptionValues[newIdx])
-					consumed = true
 				}
 			}
 		}
@@ -172,7 +164,6 @@ func (m *rootModel) handleKeyMsg(msg tea.KeyMsg) {
 		case tea.KeyEnter, tea.KeySpace:
 			if entry.OnClick != nil {
 				entry.OnClick()
-				consumed = true
 			}
 		}
 
@@ -181,23 +172,7 @@ func (m *rootModel) handleKeyMsg(msg tea.KeyMsg) {
 		case tea.KeyEnter, tea.KeySpace:
 			if entry.OnClick != nil {
 				entry.OnClick()
-				consumed = true
 			}
-		}
-	}
-
-	// If the element didn't consume the key and it's an arrow key,
-	// use it for focus navigation instead.
-	if !consumed {
-		switch msg.Type {
-		case tea.KeyDown:
-			m.prevFocus = m.focusIndex
-			m.focusIndex = (m.focusIndex + 1) % len(m.interactives)
-			m.fireFocusBlur()
-		case tea.KeyUp:
-			m.prevFocus = m.focusIndex
-			m.focusIndex = (m.focusIndex - 1 + len(m.interactives)) % len(m.interactives)
-			m.fireFocusBlur()
 		}
 	}
 }
