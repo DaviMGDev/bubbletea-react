@@ -1,0 +1,247 @@
+@* Dashboard — 5-widget interactive grid (3+2 layout) demonstrating Box,
+   Progress, Tabs, Table (no header), Form with validation, and inline
+   Divider styles. Optimised for wide terminals (~140+ cols).
+   Root column scrolls when content overflows.
+   All interactive elements are keyboard-navigable via Tab/arrows.
+   © bubbletea-react example *@
+
+page Dashboard() {
+    @ ── State ─────────────────────────────────────────────────────────
+    @ Metrics: CPU, Memory, Disk usage are editable for demo purposes
+    state cpuUsage = 67
+    state memUsage = 42
+    state diskUsage = 88
+
+    @ UI state: tab selection, form input, form history
+    state activeTab = 1
+    state formInput = ""
+    state formSubmitted = "(none)"
+
+    @ Validation state
+    state formError = false
+
+    @ ── Page-level layout (viewport-safe) ─────────────────────────────
+    @ constraint: viewport-safe — root column has scrollable:true so
+    @ content never exceeds terminal height. The implementer MUST set
+    @ overflow-y: auto and constrain height.
+    @ a11y: all interactive elements support Tab focus traversal in
+    @ source order. Initial focus lands on the first Button (-5).
+    column {
+        scrollable: true
+
+        @ ── Header ────────────────────────────────────────────────────
+        @ role: page-heading
+        Text("📊 Dashboard Demo") {
+            weight: horizontal
+        }
+        Text("Box, Progress, Tabs, TableNoHeader, Form, DividerStyle.")
+
+        Divider()
+
+        @ ── Row 1: System + Resources + Tabs ──────────────────────────
+        @ responsive: three columns side-by-side on wide terminals.
+        @ On narrow terminals (<100 chars), collapse to single column.
+        @ a11y: Tab moves focus left-to-right across cards, then
+        @ top-to-bottom to the next row.
+        row {
+            collapse: true
+
+            @ ── System Info Card ──────────────────────────────────────
+            @ role: info-card — static host metadata, no interaction
+            Card("System") {
+                Text("Host:     bubbletea-react")
+                Text("Uptime:   8767h")
+                Text("Version:  v1.0.0")
+                Text("License:  MIT")
+            }
+
+            @ ── Resources Card ────────────────────────────────────────
+            @ role: metrics-card — three progress bars with ±5 controls.
+            @ The -5 and +5 buttons clamp at 0 and 100 respectively.
+            @ a11y: buttons provide audible/visible feedback on press.
+            Card("Resources") {
+                Text("CPU Usage")
+                Progress(cpuUsage) {
+                    max: 100
+                }
+                Text("Memory")
+                Progress(memUsage) {
+                    max: 100
+                }
+                Text("Disk")
+                Progress(diskUsage) {
+                    max: 100
+                }
+                row {
+                    @ role: decrement
+                    @ a11y: reduces CPU by 5, floors at 0
+                    Button("-5") {
+                        disabled: cpuUsage <= 0
+                        on click {
+                            cpuUsage = cpuUsage - 5
+                            if cpuUsage < 0 { cpuUsage = 0 }
+                            Toast("CPU set to ${cpuUsage}%")
+                        }
+                    }
+                    @ role: increment
+                    @ a11y: increases CPU by 5, caps at 100
+                    Button("+5") {
+                        disabled: cpuUsage >= 100
+                        on click {
+                            cpuUsage = cpuUsage + 5
+                            if cpuUsage > 100 { cpuUsage = 100 }
+                            Toast("CPU set to ${cpuUsage}%")
+                        }
+                    }
+                }
+            }
+
+            @ ── Tabs Card ─────────────────────────────────────────────
+            @ role: navigation-card — three content panes switchable via
+            @ tab headers. Left/Right arrows switch between tabs,
+            @ Enter/space activates the focused tab.
+            Card("Tabs") {
+                Tabs(["Overview", "Logs", "Config"]) {
+                    active: activeTab
+                    on change { activeTab = value }
+
+                    @ Pane: Overview — summary state
+                    column {
+                        Text("  All systems nominal.")
+                        Text("  0 alerts, 0 warnings.")
+                    }
+
+                    @ Pane: Logs — recent event stream
+                    @ constraint: log lines are read-only, newest first
+                    column {
+                        Text("  [INFO]  Server started")
+                        Text("  [INFO]  Connection OK")
+                        Text("  [WARN]  Disk at 88%")
+                    }
+
+                    @ Pane: Config — display-only settings
+                    column {
+                        Text("  Theme:  dark")
+                        Text("  Port:   8080")
+                        Text("  Debug:  off")
+                    }
+                }
+            }
+        }
+
+        Divider()
+
+        @ ── Row 2: Services + Form ────────────────────────────────────
+        @ responsive: two columns on wide terminals, collapses to single
+        @ column when narrower than 100 chars.
+        row {
+            collapse: true
+
+            @ ── Services Card ─────────────────────────────────────────
+            @ role: data-card — table of service health with no header.
+            @ The 4 rows are hardcoded demo data. In a real app the
+            @ services array would come from a state variable, and the
+            @ table would handle the empty case.
+            Card("Services") {
+                @ state: services — static demo data.
+                @ In a real implementation this would be dynamic.
+                const services = [
+                    ["web-server",  "🟢 online",   "14d"],
+                    ["database",    "🟢 online",   "14d"],
+                    ["cache",       "🟡 degraded", "7d"],
+                    ["worker",      "🔴 offline",  "0d"],
+                ]
+
+                @ constraint: empty-state — when services array is empty,
+                @ show EmptyState instead of a blank table
+                if services.length == 0 {
+                    @ role: empty-placeholder
+                    EmptyState("No services registered") {
+                        Text("Deploy a service to see its status here.")
+                    }
+                } else {
+                    Table(["Service", "Status", "Uptime"], services) {
+                        header: false
+                    }
+                }
+            }
+
+            @ ── Form Card ─────────────────────────────────────────────
+            @ role: input-card — demonstrates Form element with
+            @ validation, submission feedback, and input clearing.
+            @ depends-on: form-validation
+            @ a11y: error state is announced when submit is attempted
+            @ on an empty field.
+            Card("Form") {
+                Text("The Form element wraps children and")
+                Text("appends a Submit button. Type below,")
+                Text("then Tab to Submit and press Enter.")
+
+                Form {
+                    @ a11y: on submit, validate that input is non-empty.
+                    @ If empty, set error state and prevent submission.
+                    on submit {
+                        if formInput == "" {
+                            formError = true
+                            Toast("Input cannot be empty")
+                        } else {
+                            formSubmitted = formInput
+                            formInput = ""
+                            formError = false
+                            Toast("Submitted: ${formSubmitted}")
+                        }
+                    }
+
+                    @ role: required-text-input
+                    @ a11y: placeholder describes the expected input
+                    Input("Type a message and press Submit") {
+                        required: true
+                        error: formError ? "Required — cannot be empty" : false
+                        on input {
+                            formInput = value
+                            if value != "" { formError = false }
+                        }
+                        on key("Enter") {
+                            if formInput != "" {
+                                formSubmitted = formInput
+                                formInput = ""
+                                formError = false
+                                Toast("Submitted: ${formSubmitted}")
+                            }
+                        }
+                        on key("Escape") {
+                            formInput = ""
+                            formError = false
+                        }
+                    }
+                }
+
+                @ Submission status — updates on every successful submit
+                Text("Submitted: ${formSubmitted}")
+
+                @ Quick-clear shortcut hint
+                @ a11y: describes keyboard shortcut for power users
+                Text("Esc clears input • Enter submits")
+            }
+        }
+
+        Divider()
+
+        @ ── Divider style showcase ────────────────────────────────────
+        @ constrained: inline row of dividers at various widths and
+        @ styles. This row wraps (flex-wrap) if the terminal is narrow.
+        @ a11y: decorative — dividers are purely visual separators.
+        Text("Divider styles:")
+        row {
+            wrap: true
+            Divider() { style: thin }
+            Divider() { style: double }
+            Divider() { style: dashed }
+            Divider() { label: "x" }
+        }
+
+        @ ── Footer ────────────────────────────────────────────────────
+        @ role: status-bar — describes navigation model
+        Text("⏎ Tab Enter/Space • ±5 click CPU • Esc clears form input")
+    }
+}
