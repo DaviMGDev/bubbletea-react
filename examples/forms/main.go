@@ -68,6 +68,12 @@ func (a *App) Render(ctx *react.Context) react.Element {
 						}
 					}),
 					react.Text("  "),
+					react.Button("-1", func() {
+						if progress > 0 {
+							setProgress(progress - 1)
+						}
+					}),
+					react.Text("  "),
 					react.Button("Reset", func() { setProgress(0) }),
 				),
 
