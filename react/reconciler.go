@@ -565,9 +565,15 @@ func serializeTabs(e *TabsElement, width int, interactives *[]interactiveEntry, 
 	if len(e.Tabs) == 0 {
 		return ""
 	}
+
+	// All tab headers share the same row (they're laid out horizontally)
+	nextRow()
+	thisRow := currentRowID
+	savedRow := currentRowID
+
 	headers := make([]string, 0, len(e.Tabs))
 	for i, tab := range e.Tabs {
-		nextRow() // each tab header is its own row
+		currentRowID = thisRow // force same row for all tabs
 		idx := i
 		currentHeaderIdx := *interactiveIdx
 		*interactiveIdx++
@@ -594,6 +600,8 @@ func serializeTabs(e *TabsElement, width int, interactives *[]interactiveEntry, 
 		}
 		headers = append(headers, style.Render(tab.Label))
 	}
+	currentRowID = savedRow // restore (tabs don't consume extra rows)
+
 	headerLine := lipgloss.JoinHorizontal(lipgloss.Top, headers...)
 	divider := strings.Repeat("─", width)
 	active := e.Active
