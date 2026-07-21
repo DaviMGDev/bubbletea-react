@@ -19,6 +19,7 @@ type interactiveEntry struct {
 	Value    string // current value (inputs) or serialized state
 	Checked  bool   // for checkboxes
 	OnToggle func(bool) // for checkboxes
+	RowID    int    // which visual row this element belongs to
 	// Select-specific
 	SelectedIndex int
 	OptionCount   int
@@ -50,16 +51,24 @@ type renderResult struct {
 	interactives []interactiveEntry
 }
 
+// currentRowID tracks visual rows for spatial navigation.
+// Reset each render, incremented at each new row boundary.
+// Safe because Bubble Tea is single-threaded.
+var currentRowID int
+
+// componentCounter is incremented during serialization to give each
+// ComponentElement a unique position-based key for context caching.
+var componentCounter uint64
+
 // renderElement renders an Element tree and collects interactive entries.
 func renderElement(el Element, width int, focusIndex int, cache *ctxCache) renderResult {
 	componentCounter = 0
+	currentRowID = 0
 	var result renderResult
 	var interactiveIdx int
 	result.view = serializeElement(el, width, &result.interactives, cache, focusIndex, &interactiveIdx)
 	return result
 }
-
-var componentCounter uint64
 
 func componentKey(c Component, key string) string {
 	componentCounter++
@@ -68,6 +77,12 @@ func componentKey(c Component, key string) string {
 	}
 	typeName := fmt.Sprintf("%T", c)
 	return fmt.Sprintf("%s-%d", typeName, componentCounter)
+}
+
+// nextRow bumps the row counter and returns the new value.
+func nextRow() int {
+	currentRowID++
+	return currentRowID
 }
 
 // serializeElement converts an Element tree into a rendered string.
@@ -82,7 +97,6 @@ func serializeElement(el Element, width int, interactives *[]interactiveEntry, c
 			return ""
 		}
 		return e.Text
-
 	case TextElement:
 		return e.Text
 
@@ -91,7 +105,6 @@ func serializeElement(el Element, width int, interactives *[]interactiveEntry, c
 			return ""
 		}
 		return lipgloss.NewStyle().Bold(true).Render(e.Text)
-
 	case BoldElement:
 		return lipgloss.NewStyle().Bold(true).Render(e.Text)
 
@@ -103,7 +116,6 @@ func serializeElement(el Element, width int, interactives *[]interactiveEntry, c
 		childCtx := cache.getOrCreate(key)
 		childEl := e.Component.Render(childCtx)
 		return serializeElement(childEl, width, interactives, cache, focusIndex, interactiveIdx)
-
 	case ComponentElement:
 		return serializeElement(&e, width, interactives, cache, focusIndex, interactiveIdx)
 
@@ -112,7 +124,6 @@ func serializeElement(el Element, width int, interactives *[]interactiveEntry, c
 			return ""
 		}
 		return serializeColumn(e, width, interactives, cache, focusIndex, interactiveIdx)
-
 	case ColumnElement:
 		return serializeColumn(&e, width, interactives, cache, focusIndex, interactiveIdx)
 
@@ -121,7 +132,6 @@ func serializeElement(el Element, width int, interactives *[]interactiveEntry, c
 			return ""
 		}
 		return serializeRow(e, width, interactives, cache, focusIndex, interactiveIdx)
-
 	case RowElement:
 		return serializeRow(&e, width, interactives, cache, focusIndex, interactiveIdx)
 
@@ -154,7 +164,6 @@ func serializeElement(el Element, width int, interactives *[]interactiveEntry, c
 			return style.Render("")
 		}
 		return style.Render(childStr)
-
 	case BoxElement:
 		return serializeElement(&e, width, interactives, cache, focusIndex, interactiveIdx)
 
@@ -163,7 +172,6 @@ func serializeElement(el Element, width int, interactives *[]interactiveEntry, c
 			return ""
 		}
 		return strings.Repeat("\n", e.Height)
-
 	case SpacerElement:
 		return serializeElement(&e, width, interactives, cache, focusIndex, interactiveIdx)
 
@@ -181,10 +189,10 @@ func serializeElement(el Element, width int, interactives *[]interactiveEntry, c
 				OnClick: e.OnClick,
 				OnFocus: e.OnFocus,
 				OnBlur:  e.OnBlur,
+				RowID:   currentRowID,
 			})
 		}
 		return renderButton(e.Label, isFocused)
-
 	case ButtonElement:
 		return serializeElement(&e, width, interactives, cache, focusIndex, interactiveIdx)
 
@@ -202,10 +210,10 @@ func serializeElement(el Element, width int, interactives *[]interactiveEntry, c
 				OnFocus:  e.OnFocus,
 				OnBlur:   e.OnBlur,
 				Value:    e.Value,
+				RowID:    currentRowID,
 			})
 		}
 		return renderInput(e, isFocused)
-
 	case InputElement:
 		return serializeElement(&e, width, interactives, cache, focusIndex, interactiveIdx)
 
@@ -214,7 +222,6 @@ func serializeElement(el Element, width int, interactives *[]interactiveEntry, c
 			return ""
 		}
 		return serializeScrollable(e, width, interactives, cache, focusIndex, interactiveIdx)
-
 	case ScrollableElement:
 		return serializeScrollable(&e, width, interactives, cache, focusIndex, interactiveIdx)
 
@@ -223,7 +230,6 @@ func serializeElement(el Element, width int, interactives *[]interactiveEntry, c
 			return ""
 		}
 		return serializeForm(e, width, interactives, cache, focusIndex, interactiveIdx)
-
 	case FormElement:
 		return serializeForm(&e, width, interactives, cache, focusIndex, interactiveIdx)
 
@@ -240,10 +246,10 @@ func serializeElement(el Element, width int, interactives *[]interactiveEntry, c
 				Label:    e.Label,
 				Checked:  e.Checked,
 				OnToggle: e.OnChange,
+				RowID:    currentRowID,
 			})
 		}
 		return renderCheckbox(e, isFocused)
-
 	case CheckboxElement:
 		return serializeElement(&e, width, interactives, cache, focusIndex, interactiveIdx)
 
@@ -254,7 +260,6 @@ func serializeElement(el Element, width int, interactives *[]interactiveEntry, c
 		currentIdx := *interactiveIdx
 		*interactiveIdx++
 		isFocused := (focusIndex >= 0 && currentIdx == focusIndex)
-		// Collect option values for bridge cycling
 		optCount := len(e.Options)
 		optValues := make([]string, optCount)
 		for i, o := range e.Options {
@@ -272,10 +277,10 @@ func serializeElement(el Element, width int, interactives *[]interactiveEntry, c
 				SelectedIndex: e.Selected,
 				OptionCount:   optCount,
 				OptionValues:  optValues,
+				RowID:         currentRowID,
 			})
 		}
 		return renderSelect(e, isFocused)
-
 	case SelectElement:
 		return serializeElement(&e, width, interactives, cache, focusIndex, interactiveIdx)
 
@@ -284,7 +289,6 @@ func serializeElement(el Element, width int, interactives *[]interactiveEntry, c
 			return ""
 		}
 		return renderDivider(e, width)
-
 	case DividerElement:
 		return renderDivider(&e, width)
 
@@ -293,7 +297,6 @@ func serializeElement(el Element, width int, interactives *[]interactiveEntry, c
 			return ""
 		}
 		return renderProgress(e, width)
-
 	case ProgressElement:
 		return renderProgress(&e, width)
 
@@ -302,7 +305,6 @@ func serializeElement(el Element, width int, interactives *[]interactiveEntry, c
 			return ""
 		}
 		return serializeTabs(e, width, interactives, cache, focusIndex, interactiveIdx)
-
 	case TabsElement:
 		return serializeTabs(&e, width, interactives, cache, focusIndex, interactiveIdx)
 
@@ -311,7 +313,6 @@ func serializeElement(el Element, width int, interactives *[]interactiveEntry, c
 			return ""
 		}
 		return renderTable(e, width)
-
 	case TableElement:
 		return renderTable(&e, width)
 
@@ -325,39 +326,31 @@ func serializeElement(el Element, width int, interactives *[]interactiveEntry, c
 func serializeColumn(e *ColumnElement, width int, interactives *[]interactiveEntry, cache *ctxCache, focusIndex int, interactiveIdx *int) string {
 	parts := make([]string, 0, len(e.Children))
 	for _, child := range e.Children {
+		nextRow() // each Column child starts a new visual row
 		s := serializeElement(child, width, interactives, cache, focusIndex, interactiveIdx)
 		if s != "" {
 			parts = append(parts, s)
 		}
 	}
-
 	joined := lipgloss.JoinVertical(lipgloss.Top, parts...)
-
-	// Apply alignment
 	if e.Align != nil {
-		pos := toLipglossPosition(e.Align.V)
-		joined = lipgloss.JoinVertical(pos, parts...)
+		joined = lipgloss.JoinVertical(toLipglossPosition(e.Align.V), parts...)
 	}
-
-	// Scrollable: constrain height
 	if e.Scrollable && e.Height > 0 {
 		lines := strings.Split(joined, "\n")
 		if len(lines) > e.Height {
 			lines = lines[:e.Height]
 		}
 		joined = strings.Join(lines, "\n")
-		// Ensure height
 		style := lipgloss.NewStyle().Height(e.Height)
 		joined = style.Render(joined)
 	}
-
 	return joined
 }
 
 // --- Row ---
 
 func serializeRow(e *RowElement, width int, interactives *[]interactiveEntry, cache *ctxCache, focusIndex int, interactiveIdx *int) string {
-	// Collapse: render as column on narrow terminals
 	if e.Collapse {
 		threshold := e.CollapseAt
 		if threshold <= 0 {
@@ -366,6 +359,7 @@ func serializeRow(e *RowElement, width int, interactives *[]interactiveEntry, ca
 		if width < threshold {
 			parts := make([]string, 0, len(e.Children))
 			for _, child := range e.Children {
+				nextRow()
 				s := serializeElement(child, width, interactives, cache, focusIndex, interactiveIdx)
 				if s != "" {
 					parts = append(parts, s)
@@ -379,19 +373,24 @@ func serializeRow(e *RowElement, width int, interactives *[]interactiveEntry, ca
 		}
 	}
 
-	// Normal row or wrapped row
+	// All children in a Row share the same row ID
+	nextRow()
+	thisRow := currentRowID
 	parts := make([]string, 0, len(e.Children))
+	savedRow := currentRowID
+
 	for _, child := range e.Children {
+		currentRowID = thisRow // force same row for all Row children
 		s := serializeElement(child, width, interactives, cache, focusIndex, interactiveIdx)
 		if s != "" {
 			parts = append(parts, s)
 		}
 	}
+	currentRowID = savedRow // restore (Row doesn't consume a row for nested content)
 
 	if e.Wrap {
 		return joinWrapped(parts, width)
 	}
-
 	joined := lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 	if e.Align != nil {
 		joined = lipgloss.JoinHorizontal(toLipglossPosition(e.Align.H), parts...)
@@ -399,7 +398,6 @@ func serializeRow(e *RowElement, width int, interactives *[]interactiveEntry, ca
 	return joined
 }
 
-// joinWrapped joins parts horizontally, wrapping to new lines when they exceed width.
 func joinWrapped(parts []string, width int) string {
 	if len(parts) == 0 {
 		return ""
@@ -407,7 +405,6 @@ func joinWrapped(parts []string, width int) string {
 	var lines []string
 	var currentLine []string
 	currentWidth := 0
-
 	for _, part := range parts {
 		pw := runewidth.StringWidth(part)
 		if currentWidth+pw > width && currentWidth > 0 {
@@ -416,7 +413,6 @@ func joinWrapped(parts []string, width int) string {
 			currentWidth = 0
 		}
 		if pw > width {
-			// Single part wider than line — truncate
 			part = runewidth.Truncate(part, width, "…")
 			pw = width
 		}
@@ -455,9 +451,8 @@ func serializeForm(e *FormElement, width int, interactives *[]interactiveEntry, 
 			parts = append(parts, s)
 		}
 	}
-
-	// Add form submit as the last interactive entry (after all children)
 	if e.OnSubmit != nil {
+		nextRow()
 		currentIdx := *interactiveIdx
 		*interactiveIdx++
 		_ = currentIdx
@@ -466,10 +461,10 @@ func serializeForm(e *FormElement, width int, interactives *[]interactiveEntry, 
 				Type:    "form",
 				Label:   "Submit",
 				OnClick: e.OnSubmit,
+				RowID:   currentRowID,
 			})
 		}
 	}
-
 	return strings.Join(parts, "\n")
 }
 
@@ -522,10 +517,8 @@ func renderDivider(e *DividerElement, width int) string {
 	default:
 		char = "─"
 	}
-
 	line := strings.Repeat(char, w)
 	if e.Label != "" {
-		// Place label in the middle
 		half := w / 2
 		labelStart := half - len(e.Label)/2
 		if labelStart < 0 {
@@ -572,17 +565,13 @@ func serializeTabs(e *TabsElement, width int, interactives *[]interactiveEntry, 
 	if len(e.Tabs) == 0 {
 		return ""
 	}
-
-	// Render tab headers — each header is an interactive entry
 	headers := make([]string, 0, len(e.Tabs))
 	for i, tab := range e.Tabs {
-		idx := i // capture for closure
-
-		// Add interactive entry for this tab header
+		nextRow() // each tab header is its own row
+		idx := i
 		currentHeaderIdx := *interactiveIdx
 		*interactiveIdx++
 		headerFocused := (focusIndex >= 0 && currentHeaderIdx == focusIndex)
-
 		if interactives != nil {
 			*interactives = append(*interactives, interactiveEntry{
 				Type:  "tab",
@@ -593,9 +582,9 @@ func serializeTabs(e *TabsElement, width int, interactives *[]interactiveEntry, 
 					}
 				},
 				Value: fmt.Sprintf("%d", idx),
+				RowID: currentRowID,
 			})
 		}
-
 		style := lipgloss.NewStyle().Padding(0, 2)
 		if i == e.Active {
 			style = style.Bold(true).Foreground(lipgloss.Color("63"))
@@ -605,17 +594,13 @@ func serializeTabs(e *TabsElement, width int, interactives *[]interactiveEntry, 
 		}
 		headers = append(headers, style.Render(tab.Label))
 	}
-
 	headerLine := lipgloss.JoinHorizontal(lipgloss.Top, headers...)
 	divider := strings.Repeat("─", width)
-
-	// Render active tab content
 	active := e.Active
 	if active < 0 || active >= len(e.Tabs) {
 		active = 0
 	}
 	content := serializeElement(e.Tabs[active].Content, width, interactives, cache, focusIndex, interactiveIdx)
-
 	return headerLine + "\n" + divider + "\n" + content
 }
 
@@ -625,7 +610,6 @@ func renderTable(e *TableElement, width int) string {
 	if len(e.Columns) == 0 || len(e.Rows) == 0 {
 		return ""
 	}
-
 	colWidths := make([]int, len(e.Columns))
 	totalFixed := 0
 	autoCols := 0
@@ -637,7 +621,6 @@ func renderTable(e *TableElement, width int) string {
 			autoCols++
 		}
 	}
-	// Distribute remaining space
 	remaining := width - totalFixed - (len(e.Columns) - 1)
 	if remaining > 0 && autoCols > 0 {
 		perCol := remaining / autoCols
@@ -647,8 +630,6 @@ func renderTable(e *TableElement, width int) string {
 			}
 		}
 	}
-
-	// Ensure minimum widths from column label + content
 	for i, col := range e.Columns {
 		minW := runewidth.StringWidth(col.Label) + 2
 		for _, row := range e.Rows {
@@ -662,10 +643,7 @@ func renderTable(e *TableElement, width int) string {
 			colWidths[i] = minW
 		}
 	}
-
 	var lines []string
-
-	// Header row
 	if e.Header {
 		cells := make([]string, len(e.Columns))
 		for i, col := range e.Columns {
@@ -673,15 +651,12 @@ func renderTable(e *TableElement, width int) string {
 		}
 		headerStyle := lipgloss.NewStyle().Bold(true)
 		lines = append(lines, headerStyle.Render(strings.Join(cells, " ")))
-		// Underline
 		sepParts := make([]string, len(e.Columns))
 		for i, w := range colWidths {
 			sepParts[i] = strings.Repeat("─", w)
 		}
 		lines = append(lines, strings.Join(sepParts, " "))
 	}
-
-	// Data rows
 	for _, row := range e.Rows {
 		cells := make([]string, len(e.Columns))
 		for i := range e.Columns {
@@ -693,7 +668,6 @@ func renderTable(e *TableElement, width int) string {
 		}
 		lines = append(lines, strings.Join(cells, " "))
 	}
-
 	return strings.Join(lines, "\n")
 }
 
@@ -720,7 +694,6 @@ func padOrTrunc(s string, w int) string {
 	return s + strings.Repeat(" ", w-sw)
 }
 
-// renderButton renders a button as styled text.
 func renderButton(label string, focused bool) string {
 	bg := lipgloss.Color("236")
 	fg := lipgloss.Color("255")
@@ -736,7 +709,6 @@ func renderButton(label string, focused bool) string {
 	return " " + style.Render(" "+label+" ") + " "
 }
 
-// renderInput renders an input field.
 func renderInput(e *InputElement, focused bool) string {
 	displayText := e.Value
 	if displayText == "" {
@@ -749,7 +721,6 @@ func renderInput(e *InputElement, focused bool) string {
 	if len(displayText) > w {
 		displayText = displayText[len(displayText)-w:]
 	}
-
 	borderColor := lipgloss.Color("240")
 	if focused {
 		borderColor = lipgloss.Color("63")

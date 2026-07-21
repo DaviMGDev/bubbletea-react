@@ -86,26 +86,36 @@ func (m *rootModel) handleKeyMsg(msg tea.KeyMsg) {
 		return
 	}
 
-	// Navigation keys — Tab, ShiftTab, Up, Down all move focus
+	if m.focusIndex < 0 || m.focusIndex >= len(m.interactives) {
+		// No interactives at all — navigate keys do nothing
+		switch msg.Type {
+		case tea.KeyTab, tea.KeyShiftTab, tea.KeyUp, tea.KeyDown, tea.KeyLeft, tea.KeyRight:
+			return
+		}
+		return
+	}
+
+	entry := m.interactives[m.focusIndex]
+	currentRow := entry.RowID
+
+	// Navigation keys
 	switch msg.Type {
 	case tea.KeyTab, tea.KeyDown:
+		// Vertical: next element in a DIFFERENT row
 		m.prevFocus = m.focusIndex
-		m.focusIndex = (m.focusIndex + 1) % len(m.interactives)
+		m.focusIndex = nextDifferentRow(m.interactives, m.focusIndex, currentRow, +1)
 		m.fireFocusBlur()
 		return
 	case tea.KeyShiftTab, tea.KeyUp:
+		// Vertical: previous element in a DIFFERENT row
 		m.prevFocus = m.focusIndex
-		m.focusIndex = (m.focusIndex - 1 + len(m.interactives)) % len(m.interactives)
+		m.focusIndex = prevDifferentRow(m.interactives, m.focusIndex, currentRow)
 		m.fireFocusBlur()
 		return
 	}
 
-	if m.focusIndex < 0 || m.focusIndex >= len(m.interactives) {
-		return
-	}
-
-	// Route key to focused element
-	entry := m.interactives[m.focusIndex]
+	// Route non-navigation keys to focused element
+	leftRightConsumed := false
 
 	switch entry.Type {
 	case "button":
@@ -150,11 +160,13 @@ func (m *rootModel) handleKeyMsg(msg tea.KeyMsg) {
 				newIdx := (entry.SelectedIndex + 1) % entry.OptionCount
 				if newIdx >= 0 && newIdx < len(entry.OptionValues) && entry.OnChange != nil {
 					entry.OnChange(entry.OptionValues[newIdx])
+					leftRightConsumed = true
 				}
 			case tea.KeyLeft:
 				newIdx := (entry.SelectedIndex - 1 + entry.OptionCount) % entry.OptionCount
 				if newIdx >= 0 && newIdx < len(entry.OptionValues) && entry.OnChange != nil {
 					entry.OnChange(entry.OptionValues[newIdx])
+					leftRightConsumed = true
 				}
 			}
 		}
@@ -175,6 +187,67 @@ func (m *rootModel) handleKeyMsg(msg tea.KeyMsg) {
 			}
 		}
 	}
+
+	// Left/Right: same-row navigation (unless consumed by Select)
+	if !leftRightConsumed {
+		switch msg.Type {
+		case tea.KeyRight:
+			if next := nextSameRow(m.interactives, m.focusIndex, currentRow); next >= 0 {
+				m.prevFocus = m.focusIndex
+				m.focusIndex = next
+				m.fireFocusBlur()
+			}
+		case tea.KeyLeft:
+			if prev := prevSameRow(m.interactives, m.focusIndex, currentRow); prev >= 0 {
+				m.prevFocus = m.focusIndex
+				m.focusIndex = prev
+				m.fireFocusBlur()
+			}
+		}
+	}
+}
+
+// nextDifferentRow finds the next element forward (wrapping) with a different row ID.
+func nextDifferentRow(entries []interactiveEntry, from int, rowID int, dir int) int {
+	n := len(entries)
+	for i := 1; i < n; i++ {
+		idx := (from + i*dir + n) % n
+		if entries[idx].RowID != rowID {
+			return idx
+		}
+	}
+	return from
+}
+
+// prevDifferentRow finds the previous element with a different row ID.
+func prevDifferentRow(entries []interactiveEntry, from int, rowID int) int {
+	return nextDifferentRow(entries, from, rowID, -1)
+}
+
+// nextSameRow finds the next element forward with the same row ID.
+// Returns -1 if none found.
+func nextSameRow(entries []interactiveEntry, from int, rowID int) int {
+	n := len(entries)
+	for i := 1; i < n; i++ {
+		idx := (from + i) % n
+		if entries[idx].RowID == rowID {
+			return idx
+		}
+	}
+	return -1
+}
+
+// prevSameRow finds the previous element with the same row ID.
+// Returns -1 if none found.
+func prevSameRow(entries []interactiveEntry, from int, rowID int) int {
+	n := len(entries)
+	for i := 1; i < n; i++ {
+		idx := (from - i + n) % n
+		if entries[idx].RowID == rowID {
+			return idx
+		}
+	}
+	return -1
 }
 
 func (m *rootModel) fireFocusBlur() {
