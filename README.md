@@ -81,6 +81,28 @@ func main() {
 }
 ```
 
+## Examples
+
+All examples are in the [`examples/`](examples/) directory. Run any of them with:
+
+```bash
+cd examples/<name>
+go run .
+```
+
+| Example | Features Demonstrated |
+|---|---|
+| [`counter`](examples/counter/) | `UseState`, `Button`, `Row`, `Box`, `Bold`, `Spacer`, `Textf` |
+| [`forms`](examples/forms/) | `Input`, `Checkbox`, `Select`, `Progress`, `Tabs`, `Divider`, multiple `UseState` |
+| [`todo`](examples/todo/) | `UseState` with dynamic lists, `Input`, `Button`, list rendering |
+| [`effects`](examples/effects/) | `UseEffect` (dependency tracking & cleanup), `UseRef`, `Scrollable`, `Col` with `WithAlign` |
+| [`datatable`](examples/datatable/) | `Table`, `Tabs`, `Wrap` (nested components with isolated state) |
+| [`chat`](examples/chat/) | `RowOpts` `WithCollapse` (responsive layout), `Input`, `Button`, list state |
+| [`navigation`](examples/navigation/) | `ButtonWithOptions`, `InputWithOptions` (`OnFocus`/`OnBlur` callbacks) |
+| [`stopwatch`](examples/stopwatch/) | `UseEffect`, `UseRef` (lap storage), `Progress`, `Button` control groups |
+| [`explorer`](examples/explorer/) | Deep `Wrap` nesting tree, `Scrollable`, `Table` detail view, per-component state |
+| [`dashboard`](examples/dashboard/) | `Col`/`RowOpts` layout (`WithWrap`, `WithAlign`), `Form`, `Box` variants, `TableNoHeader`, inline `DividerStyle` |
+
 ## API
 
 ### Hooks
@@ -162,6 +184,7 @@ func main() {
 | `WithOnBlur(fn)` | Button | Fires when element loses Tab focus |
 | `InputOnFocus(fn)` | Input | Fires when input receives focus |
 | `InputOnBlur(fn)` | Input | Fires when input loses focus |
+| `InputOnSubmit(fn)` | Input | Fires when Enter is pressed while input is focused (form submission) |
 
 ## How It Works
 

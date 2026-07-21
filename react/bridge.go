@@ -128,6 +128,10 @@ func (m *rootModel) handleKeyMsg(msg tea.KeyMsg) {
 
 	case "input":
 		switch msg.Type {
+		case tea.KeyEnter:
+			if entry.OnSubmit != nil {
+				entry.OnSubmit()
+			}
 		case tea.KeyRunes:
 			if entry.OnChange != nil {
 				newValue := entry.Value + string(msg.Runes)

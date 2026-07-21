@@ -167,6 +167,7 @@ type InputElement struct {
 	Width       int
 	OnFocus     func()
 	OnBlur      func()
+	OnSubmit    func() // called when Enter is pressed while focused
 }
 
 func (InputElement) element() {}

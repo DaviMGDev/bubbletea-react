@@ -14,6 +14,7 @@ type interactiveEntry struct {
 	Label    string // displayed label
 	OnClick  func() // activation handler (buttons, tabs, form submit)
 	OnChange func(string) // value change handler (inputs, select)
+	OnSubmit func() // called on Enter (input-specific)
 	OnFocus  func()
 	OnBlur   func()
 	Value    string // current value (inputs) or serialized state
@@ -139,9 +140,14 @@ func serializeElement(el Element, width int, interactives *[]interactiveEntry, c
 		if e == nil {
 			return ""
 		}
-		childWidth := e.Width - 4
+		// Calculate actual overhead: border (2 if present) + padding (2 * value).
+		overhead := 2 * e.Padding
+		if e.Border {
+			overhead += 2
+		}
+		childWidth := e.Width - overhead
 		if childWidth < 0 {
-			childWidth = width - 4
+			childWidth = width - overhead
 		}
 		childStr := serializeElement(e.Child, childWidth, interactives, cache, focusIndex, interactiveIdx)
 		style := lipgloss.NewStyle()
@@ -207,6 +213,7 @@ func serializeElement(el Element, width int, interactives *[]interactiveEntry, c
 			*interactives = append(*interactives, interactiveEntry{
 				Type:     "input",
 				OnChange: e.OnChange,
+				OnSubmit: e.OnSubmit,
 				OnFocus:  e.OnFocus,
 				OnBlur:   e.OnBlur,
 				Value:    e.Value,
@@ -402,25 +409,32 @@ func joinWrapped(parts []string, width int) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	var lines []string
-	var currentLine []string
-	currentWidth := 0
-	for _, part := range parts {
-		pw := runewidth.StringWidth(part)
-		if currentWidth+pw > width && currentWidth > 0 {
-			lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Top, currentLine...))
-			currentLine = nil
-			currentWidth = 0
+
+	// Split each part into lines and find the max number of lines.
+	maxLines := 0
+	partLines := make([][]string, len(parts))
+	for i, part := range parts {
+		partLines[i] = strings.Split(part, "\n")
+		if len(partLines[i]) > maxLines {
+			maxLines = len(partLines[i])
 		}
-		if pw > width {
-			part = runewidth.Truncate(part, width, "…")
-			pw = width
-		}
-		currentLine = append(currentLine, part)
-		currentWidth += pw
 	}
-	if len(currentLine) > 0 {
-		lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Top, currentLine...))
+
+	// Pad shorter parts with empty lines so all have the same height.
+	for i := range partLines {
+		for len(partLines[i]) < maxLines {
+			partLines[i] = append(partLines[i], "")
+		}
+	}
+
+	// Build output: for each line index, join all parts horizontally.
+	var lines []string
+	for lineIdx := 0; lineIdx < maxLines; lineIdx++ {
+		var rowParts []string
+		for _, pl := range partLines {
+			rowParts = append(rowParts, pl[lineIdx])
+		}
+		lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Top, rowParts...))
 	}
 	return strings.Join(lines, "\n")
 }

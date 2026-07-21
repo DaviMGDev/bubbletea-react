@@ -76,6 +76,12 @@ func InputOnBlur(fn func()) InputOption {
 	return func(i *InputElement) { i.OnBlur = fn }
 }
 
+// InputOnSubmit sets a callback fired when Enter is pressed while the
+// input is focused. Useful for form submission.
+func InputOnSubmit(fn func()) InputOption {
+	return func(i *InputElement) { i.OnSubmit = fn }
+}
+
 func applyInputOpts(i *InputElement, opts []InputOption) {
 	for _, o := range opts {
 		o(i)
