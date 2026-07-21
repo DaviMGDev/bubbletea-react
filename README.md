@@ -20,7 +20,7 @@ func main() { react.Root(&Counter{}).Run() }
 ## Features
 
 - **Hooks**: `UseState`, `UseEffect`, `UseRef` — deterministic, order-based (like React)
-- **Declarative elements**: `Text`, `Button`, `Column`, `Row`, `Box`, `Input`, `Spacer`
+- **Declarative elements**: `Text`, `Button`, `Column`, `Row`, `Box`, `Input`, `Spacer`, `Checkbox`, `Select`, `Divider`, `Progress`, `Tabs`, `Table`, `Scrollable`, `Form`
 - **Composition**: Nest components via the `Wrap` function
 - **Keyboard navigation**: Tab/arrows to focus, Enter to activate
 - **Zero config**: `Root(component)` returns a ready-to-run `*tea.Program`
@@ -99,13 +99,35 @@ func main() {
 | `Textf(format, args...)` | Formatted text |
 | `Bold(s)` | Bold text |
 | `Button(label, onClick)` | Clickable button |
+| `ButtonWithOptions(label, onClick, opts...)` | Button with focus/blur callbacks |
+| `Input(value, onChange, placeholder, width)` | Text input |
+| `InputWithOptions(value, onChange, placeholder, width, opts...)` | Input with focus/blur callbacks |
+| `Checkbox(label, checked, onToggle)` | Toggleable checkbox |
+| `Select(options, selected, onChange)` | Selection from options list |
 | `Column(children...)` | Vertical layout |
 | `Row(children...)` | Horizontal layout |
+| `Col(opts...).Children(children...)` | Column with layout options (align, scrollable) |
+| `RowOpts(opts...).Children(children...)` | Row with layout options (align, wrap, collapse) |
 | `Box(child, opts...)` | Styled container (border, padding, width, height, title) |
+| `Scrollable(child, height)` | Scrollable viewport |
+| `Form(onSubmit, children...)` | Form container |
 | `Spacer(height)` | Vertical spacing |
-| `Input(value, onChange, placeholder, width)` | Text input |
+| `Divider(opts...)` | Horizontal separator |
+| `Progress(current, total, opts...)` | Progress bar |
+| `Tabs(tabs, active, onChange)` | Tab container with content panes |
+| `Table(columns, rows, opts...)` | Data table |
 | `Wrap(component, key)` | Nest a child component |
 | `View(children...)` | Top-level wrapper (alias for Column) |
+
+### Layout Options (Col / RowOpts)
+
+| Function | Description |
+|---|---|
+| `WithAlign(v, h)` | Set vertical + horizontal alignment |
+| `WithWrap(bool)` | Enable row wrapping on overflow |
+| `WithCollapse(bool)` | Auto-collapse row to column on narrow terminals |
+| `WithCollapseAt(threshold)` | Set collapse width threshold (default 80) |
+| `WithScrollable(height)` | Make column scrollable with fixed viewport |
 
 ### Box Options
 
@@ -116,6 +138,30 @@ func main() {
 | `WithWidth(n)` | Width in characters |
 | `WithHeight(n)` | Height in characters |
 | `WithTitle(s)` | Header title |
+
+### Divider Options
+
+| Function | Description |
+|---|---|
+| `DividerStyle("thin" / "double" / "dashed")` | Line style |
+| `DividerWidth(n)` | Line width |
+| `DividerLabel(s)` | Centered label |
+
+### Progress Options
+
+| Function | Description |
+|---|---|
+| `ProgressWidth(n)` | Bar width in characters |
+| `ProgressLabel(s)` | Additional label text |
+
+### Button / Input Options
+
+| Function | Applies to | Description |
+|---|---|---|
+| `WithOnFocus(fn)` | Button | Fires when element receives Tab focus |
+| `WithOnBlur(fn)` | Button | Fires when element loses Tab focus |
+| `InputOnFocus(fn)` | Input | Fires when input receives focus |
+| `InputOnBlur(fn)` | Input | Fires when input loses focus |
 
 ## How It Works
 

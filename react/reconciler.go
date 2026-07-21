@@ -5,19 +5,27 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 )
 
 // interactiveEntry describes a focusable interactive element in the rendered tree.
 type interactiveEntry struct {
-	Type     string // "button" or "input"
-	Label    string // displayed label (for buttons)
-	OnClick  func() // set for buttons
-	OnChange func(string) // set for inputs
-	Value    string // current value (for inputs)
+	Type     string // "button", "input", "checkbox", "select", "tab", "form"
+	Label    string // displayed label
+	OnClick  func() // activation handler (buttons, tabs, form submit)
+	OnChange func(string) // value change handler (inputs, select)
+	OnFocus  func()
+	OnBlur   func()
+	Value    string // current value (inputs) or serialized state
+	Checked  bool   // for checkboxes
+	OnToggle func(bool) // for checkboxes
+	// Select-specific
+	SelectedIndex int
+	OptionCount   int
+	OptionValues  []string // option values for cycling
 }
 
 // ctxCache stores contexts for component instances, keyed by instance key.
-// This ensures hooks persist across renders for nested components.
 type ctxCache struct {
 	entries map[string]*Context
 }
@@ -26,15 +34,12 @@ func newCtxCache() *ctxCache {
 	return &ctxCache{entries: make(map[string]*Context)}
 }
 
-// getOrCreate returns a context for the given component instance key.
 func (c *ctxCache) getOrCreate(key string) *Context {
 	if ctx, ok := c.entries[key]; ok {
 		ctx.ResetHooks()
 		return ctx
 	}
-	ctx := &Context{
-		hooks: make([]any, 0),
-	}
+	ctx := &Context{hooks: make([]any, 0)}
 	c.entries[key] = ctx
 	return ctx
 }
@@ -46,20 +51,16 @@ type renderResult struct {
 }
 
 // renderElement renders an Element tree and collects interactive entries.
-// focusIndex is the index of the currently focused interactive element, or -1.
 func renderElement(el Element, width int, focusIndex int, cache *ctxCache) renderResult {
 	componentCounter = 0
 	var result renderResult
-	var interactiveIdx int // tracks position in the interactive list during serialization
+	var interactiveIdx int
 	result.view = serializeElement(el, width, &result.interactives, cache, focusIndex, &interactiveIdx)
 	return result
 }
 
-// componentCounter is incremented during serialization to give each
-// ComponentElement a unique position-based key for context caching.
 var componentCounter uint64
 
-// componentKey generates a stable key for a component instance.
 func componentKey(c Component, key string) string {
 	componentCounter++
 	if key != "" {
@@ -70,9 +71,6 @@ func componentKey(c Component, key string) string {
 }
 
 // serializeElement converts an Element tree into a rendered string.
-// It appends interactive entries to the provided slice as it encounters them.
-// focusIndex indicates which interactive element is focused (-1 = none).
-// interactiveIdx tracks the current position in the interactive list.
 func serializeElement(el Element, width int, interactives *[]interactiveEntry, cache *ctxCache, focusIndex int, interactiveIdx *int) string {
 	if el == nil {
 		return ""
@@ -113,39 +111,29 @@ func serializeElement(el Element, width int, interactives *[]interactiveEntry, c
 		if e == nil {
 			return ""
 		}
-		parts := make([]string, 0, len(e.Children))
-		for _, child := range e.Children {
-			s := serializeElement(child, width, interactives, cache, focusIndex, interactiveIdx)
-			if s != "" {
-				parts = append(parts, s)
-			}
-		}
-		return lipgloss.JoinVertical(lipgloss.Top, parts...)
+		return serializeColumn(e, width, interactives, cache, focusIndex, interactiveIdx)
 
 	case ColumnElement:
-		return serializeElement(&e, width, interactives, cache, focusIndex, interactiveIdx)
+		return serializeColumn(&e, width, interactives, cache, focusIndex, interactiveIdx)
 
 	case *RowElement:
 		if e == nil {
 			return ""
 		}
-		parts := make([]string, 0, len(e.Children))
-		for _, child := range e.Children {
-			s := serializeElement(child, width, interactives, cache, focusIndex, interactiveIdx)
-			if s != "" {
-				parts = append(parts, s)
-			}
-		}
-		return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
+		return serializeRow(e, width, interactives, cache, focusIndex, interactiveIdx)
 
 	case RowElement:
-		return serializeElement(&e, width, interactives, cache, focusIndex, interactiveIdx)
+		return serializeRow(&e, width, interactives, cache, focusIndex, interactiveIdx)
 
 	case *BoxElement:
 		if e == nil {
 			return ""
 		}
-		childStr := serializeElement(e.Child, e.Width-4, interactives, cache, focusIndex, interactiveIdx)
+		childWidth := e.Width - 4
+		if childWidth < 0 {
+			childWidth = width - 4
+		}
+		childStr := serializeElement(e.Child, childWidth, interactives, cache, focusIndex, interactiveIdx)
 		style := lipgloss.NewStyle()
 		if e.Width > 0 {
 			style = style.Width(e.Width)
@@ -191,6 +179,8 @@ func serializeElement(el Element, width int, interactives *[]interactiveEntry, c
 				Type:    "button",
 				Label:   e.Label,
 				OnClick: e.OnClick,
+				OnFocus: e.OnFocus,
+				OnBlur:  e.OnBlur,
 			})
 		}
 		return renderButton(e.Label, isFocused)
@@ -209,6 +199,8 @@ func serializeElement(el Element, width int, interactives *[]interactiveEntry, c
 			*interactives = append(*interactives, interactiveEntry{
 				Type:     "input",
 				OnChange: e.OnChange,
+				OnFocus:  e.OnFocus,
+				OnBlur:   e.OnBlur,
 				Value:    e.Value,
 			})
 		}
@@ -217,9 +209,515 @@ func serializeElement(el Element, width int, interactives *[]interactiveEntry, c
 	case InputElement:
 		return serializeElement(&e, width, interactives, cache, focusIndex, interactiveIdx)
 
+	case *ScrollableElement:
+		if e == nil {
+			return ""
+		}
+		return serializeScrollable(e, width, interactives, cache, focusIndex, interactiveIdx)
+
+	case ScrollableElement:
+		return serializeScrollable(&e, width, interactives, cache, focusIndex, interactiveIdx)
+
+	case *FormElement:
+		if e == nil {
+			return ""
+		}
+		return serializeForm(e, width, interactives, cache, focusIndex, interactiveIdx)
+
+	case FormElement:
+		return serializeForm(&e, width, interactives, cache, focusIndex, interactiveIdx)
+
+	case *CheckboxElement:
+		if e == nil {
+			return ""
+		}
+		currentIdx := *interactiveIdx
+		*interactiveIdx++
+		isFocused := (focusIndex >= 0 && currentIdx == focusIndex)
+		if interactives != nil {
+			*interactives = append(*interactives, interactiveEntry{
+				Type:     "checkbox",
+				Label:    e.Label,
+				Checked:  e.Checked,
+				OnToggle: e.OnChange,
+			})
+		}
+		return renderCheckbox(e, isFocused)
+
+	case CheckboxElement:
+		return serializeElement(&e, width, interactives, cache, focusIndex, interactiveIdx)
+
+	case *SelectElement:
+		if e == nil {
+			return ""
+		}
+		currentIdx := *interactiveIdx
+		*interactiveIdx++
+		isFocused := (focusIndex >= 0 && currentIdx == focusIndex)
+		// Collect option values for bridge cycling
+		optCount := len(e.Options)
+		optValues := make([]string, optCount)
+		for i, o := range e.Options {
+			optValues[i] = o.Value
+		}
+		if interactives != nil {
+			*interactives = append(*interactives, interactiveEntry{
+				Type:          "select",
+				OnChange: func(val string) {
+					if e.OnChange != nil {
+						e.OnChange(val)
+					}
+				},
+				Value:         fmt.Sprintf("%d", e.Selected),
+				SelectedIndex: e.Selected,
+				OptionCount:   optCount,
+				OptionValues:  optValues,
+			})
+		}
+		return renderSelect(e, isFocused)
+
+	case SelectElement:
+		return serializeElement(&e, width, interactives, cache, focusIndex, interactiveIdx)
+
+	case *DividerElement:
+		if e == nil {
+			return ""
+		}
+		return renderDivider(e, width)
+
+	case DividerElement:
+		return renderDivider(&e, width)
+
+	case *ProgressElement:
+		if e == nil {
+			return ""
+		}
+		return renderProgress(e, width)
+
+	case ProgressElement:
+		return renderProgress(&e, width)
+
+	case *TabsElement:
+		if e == nil {
+			return ""
+		}
+		return serializeTabs(e, width, interactives, cache, focusIndex, interactiveIdx)
+
+	case TabsElement:
+		return serializeTabs(&e, width, interactives, cache, focusIndex, interactiveIdx)
+
+	case *TableElement:
+		if e == nil {
+			return ""
+		}
+		return renderTable(e, width)
+
+	case TableElement:
+		return renderTable(&e, width)
+
 	default:
 		return ""
 	}
+}
+
+// --- Column ---
+
+func serializeColumn(e *ColumnElement, width int, interactives *[]interactiveEntry, cache *ctxCache, focusIndex int, interactiveIdx *int) string {
+	parts := make([]string, 0, len(e.Children))
+	for _, child := range e.Children {
+		s := serializeElement(child, width, interactives, cache, focusIndex, interactiveIdx)
+		if s != "" {
+			parts = append(parts, s)
+		}
+	}
+
+	joined := lipgloss.JoinVertical(lipgloss.Top, parts...)
+
+	// Apply alignment
+	if e.Align != nil {
+		pos := toLipglossPosition(e.Align.V)
+		joined = lipgloss.JoinVertical(pos, parts...)
+	}
+
+	// Scrollable: constrain height
+	if e.Scrollable && e.Height > 0 {
+		lines := strings.Split(joined, "\n")
+		if len(lines) > e.Height {
+			lines = lines[:e.Height]
+		}
+		joined = strings.Join(lines, "\n")
+		// Ensure height
+		style := lipgloss.NewStyle().Height(e.Height)
+		joined = style.Render(joined)
+	}
+
+	return joined
+}
+
+// --- Row ---
+
+func serializeRow(e *RowElement, width int, interactives *[]interactiveEntry, cache *ctxCache, focusIndex int, interactiveIdx *int) string {
+	// Collapse: render as column on narrow terminals
+	if e.Collapse {
+		threshold := e.CollapseAt
+		if threshold <= 0 {
+			threshold = 80
+		}
+		if width < threshold {
+			parts := make([]string, 0, len(e.Children))
+			for _, child := range e.Children {
+				s := serializeElement(child, width, interactives, cache, focusIndex, interactiveIdx)
+				if s != "" {
+					parts = append(parts, s)
+				}
+			}
+			joined := lipgloss.JoinVertical(lipgloss.Top, parts...)
+			if e.Align != nil {
+				joined = lipgloss.JoinVertical(toLipglossPosition(e.Align.V), parts...)
+			}
+			return joined
+		}
+	}
+
+	// Normal row or wrapped row
+	parts := make([]string, 0, len(e.Children))
+	for _, child := range e.Children {
+		s := serializeElement(child, width, interactives, cache, focusIndex, interactiveIdx)
+		if s != "" {
+			parts = append(parts, s)
+		}
+	}
+
+	if e.Wrap {
+		return joinWrapped(parts, width)
+	}
+
+	joined := lipgloss.JoinHorizontal(lipgloss.Top, parts...)
+	if e.Align != nil {
+		joined = lipgloss.JoinHorizontal(toLipglossPosition(e.Align.H), parts...)
+	}
+	return joined
+}
+
+// joinWrapped joins parts horizontally, wrapping to new lines when they exceed width.
+func joinWrapped(parts []string, width int) string {
+	if len(parts) == 0 {
+		return ""
+	}
+	var lines []string
+	var currentLine []string
+	currentWidth := 0
+
+	for _, part := range parts {
+		pw := runewidth.StringWidth(part)
+		if currentWidth+pw > width && currentWidth > 0 {
+			lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Top, currentLine...))
+			currentLine = nil
+			currentWidth = 0
+		}
+		if pw > width {
+			// Single part wider than line — truncate
+			part = runewidth.Truncate(part, width, "…")
+			pw = width
+		}
+		currentLine = append(currentLine, part)
+		currentWidth += pw
+	}
+	if len(currentLine) > 0 {
+		lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Top, currentLine...))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// --- Scrollable ---
+
+func serializeScrollable(e *ScrollableElement, width int, interactives *[]interactiveEntry, cache *ctxCache, focusIndex int, interactiveIdx *int) string {
+	child := serializeElement(e.Child, width, interactives, cache, focusIndex, interactiveIdx)
+	h := e.Height
+	if h <= 0 {
+		h = 10
+	}
+	lines := strings.Split(child, "\n")
+	if len(lines) > h {
+		lines = lines[:h]
+	}
+	style := lipgloss.NewStyle().Height(h).MaxHeight(h)
+	return style.Render(strings.Join(lines, "\n"))
+}
+
+// --- Form ---
+
+func serializeForm(e *FormElement, width int, interactives *[]interactiveEntry, cache *ctxCache, focusIndex int, interactiveIdx *int) string {
+	parts := make([]string, 0, len(e.Children))
+	for _, child := range e.Children {
+		s := serializeElement(child, width, interactives, cache, focusIndex, interactiveIdx)
+		if s != "" {
+			parts = append(parts, s)
+		}
+	}
+
+	// Add form submit as the last interactive entry (after all children)
+	if e.OnSubmit != nil {
+		currentIdx := *interactiveIdx
+		*interactiveIdx++
+		_ = currentIdx
+		if interactives != nil {
+			*interactives = append(*interactives, interactiveEntry{
+				Type:    "form",
+				Label:   "Submit",
+				OnClick: e.OnSubmit,
+			})
+		}
+	}
+
+	return strings.Join(parts, "\n")
+}
+
+// --- Checkbox ---
+
+func renderCheckbox(e *CheckboxElement, focused bool) string {
+	mark := " "
+	if e.Checked {
+		mark = "x"
+	}
+	box := fmt.Sprintf("[%s]", mark)
+	style := lipgloss.NewStyle()
+	if focused {
+		style = style.Foreground(lipgloss.Color("63")).Bold(true)
+	}
+	return style.Render(box) + " " + e.Label
+}
+
+// --- Select ---
+
+func renderSelect(e *SelectElement, focused bool) string {
+	if len(e.Options) == 0 {
+		return "(no options)"
+	}
+	sel := e.Selected
+	if sel < 0 || sel >= len(e.Options) {
+		sel = 0
+	}
+	opt := e.Options[sel]
+	style := lipgloss.NewStyle().Padding(0, 1)
+	if focused {
+		style = style.Background(lipgloss.Color("236")).Foreground(lipgloss.Color("255"))
+	}
+	return style.Render(fmt.Sprintf("▸ %s", opt.Label))
+}
+
+// --- Divider ---
+
+func renderDivider(e *DividerElement, width int) string {
+	w := e.Width
+	if w <= 0 {
+		w = width
+	}
+	var char string
+	switch e.Style {
+	case "double":
+		char = "═"
+	case "dashed":
+		char = " ─"
+	default:
+		char = "─"
+	}
+
+	line := strings.Repeat(char, w)
+	if e.Label != "" {
+		// Place label in the middle
+		half := w / 2
+		labelStart := half - len(e.Label)/2
+		if labelStart < 0 {
+			labelStart = 0
+		}
+		runes := []rune(line)
+		for i, ch := range e.Label {
+			pos := labelStart + i
+			if pos < len(runes) {
+				runes[pos] = ch
+			}
+		}
+		line = string(runes)
+	}
+	return line
+}
+
+// --- Progress ---
+
+func renderProgress(e *ProgressElement, width int) string {
+	w := e.Width
+	if w <= 0 {
+		w = width
+	}
+	pct := 0.0
+	if e.Total > 0 {
+		pct = float64(e.Current) / float64(e.Total)
+	}
+	filled := int(pct * float64(w))
+	if filled > w {
+		filled = w
+	}
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", w-filled)
+	label := fmt.Sprintf(" %d/%d", e.Current, e.Total)
+	if e.Label != "" {
+		label = " " + e.Label
+	}
+	return bar + label
+}
+
+// --- Tabs ---
+
+func serializeTabs(e *TabsElement, width int, interactives *[]interactiveEntry, cache *ctxCache, focusIndex int, interactiveIdx *int) string {
+	if len(e.Tabs) == 0 {
+		return ""
+	}
+
+	// Render tab headers — each header is an interactive entry
+	headers := make([]string, 0, len(e.Tabs))
+	for i, tab := range e.Tabs {
+		idx := i // capture for closure
+
+		// Add interactive entry for this tab header
+		currentHeaderIdx := *interactiveIdx
+		*interactiveIdx++
+		headerFocused := (focusIndex >= 0 && currentHeaderIdx == focusIndex)
+
+		if interactives != nil {
+			*interactives = append(*interactives, interactiveEntry{
+				Type:  "tab",
+				Label: tab.Label,
+				OnClick: func() {
+					if e.OnChange != nil {
+						e.OnChange(idx)
+					}
+				},
+				Value: fmt.Sprintf("%d", idx),
+			})
+		}
+
+		style := lipgloss.NewStyle().Padding(0, 2)
+		if i == e.Active {
+			style = style.Bold(true).Foreground(lipgloss.Color("63"))
+		}
+		if headerFocused {
+			style = style.Background(lipgloss.Color("236"))
+		}
+		headers = append(headers, style.Render(tab.Label))
+	}
+
+	headerLine := lipgloss.JoinHorizontal(lipgloss.Top, headers...)
+	divider := strings.Repeat("─", width)
+
+	// Render active tab content
+	active := e.Active
+	if active < 0 || active >= len(e.Tabs) {
+		active = 0
+	}
+	content := serializeElement(e.Tabs[active].Content, width, interactives, cache, focusIndex, interactiveIdx)
+
+	return headerLine + "\n" + divider + "\n" + content
+}
+
+// --- Table ---
+
+func renderTable(e *TableElement, width int) string {
+	if len(e.Columns) == 0 || len(e.Rows) == 0 {
+		return ""
+	}
+
+	colWidths := make([]int, len(e.Columns))
+	totalFixed := 0
+	autoCols := 0
+	for i, col := range e.Columns {
+		if col.Width > 0 {
+			colWidths[i] = col.Width
+			totalFixed += col.Width
+		} else {
+			autoCols++
+		}
+	}
+	// Distribute remaining space
+	remaining := width - totalFixed - (len(e.Columns) - 1)
+	if remaining > 0 && autoCols > 0 {
+		perCol := remaining / autoCols
+		for i := range colWidths {
+			if colWidths[i] == 0 {
+				colWidths[i] = perCol
+			}
+		}
+	}
+
+	// Ensure minimum widths from column label + content
+	for i, col := range e.Columns {
+		minW := runewidth.StringWidth(col.Label) + 2
+		for _, row := range e.Rows {
+			if i < len(row) {
+				if w := runewidth.StringWidth(row[i]) + 2; w > minW {
+					minW = w
+				}
+			}
+		}
+		if colWidths[i] < minW {
+			colWidths[i] = minW
+		}
+	}
+
+	var lines []string
+
+	// Header row
+	if e.Header {
+		cells := make([]string, len(e.Columns))
+		for i, col := range e.Columns {
+			cells[i] = padOrTrunc(col.Label, colWidths[i])
+		}
+		headerStyle := lipgloss.NewStyle().Bold(true)
+		lines = append(lines, headerStyle.Render(strings.Join(cells, " ")))
+		// Underline
+		sepParts := make([]string, len(e.Columns))
+		for i, w := range colWidths {
+			sepParts[i] = strings.Repeat("─", w)
+		}
+		lines = append(lines, strings.Join(sepParts, " "))
+	}
+
+	// Data rows
+	for _, row := range e.Rows {
+		cells := make([]string, len(e.Columns))
+		for i := range e.Columns {
+			val := ""
+			if i < len(row) {
+				val = row[i]
+			}
+			cells[i] = padOrTrunc(val, colWidths[i])
+		}
+		lines = append(lines, strings.Join(cells, " "))
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// --- Helpers ---
+
+func toLipglossPosition(p AlignPosition) lipgloss.Position {
+	switch p {
+	case Top:
+		return lipgloss.Top
+	case Bottom:
+		return lipgloss.Bottom
+	case Center:
+		return lipgloss.Center
+	default:
+		return lipgloss.Top
+	}
+}
+
+func padOrTrunc(s string, w int) string {
+	sw := runewidth.StringWidth(s)
+	if sw >= w {
+		return runewidth.Truncate(s, w, "…")
+	}
+	return s + strings.Repeat(" ", w-sw)
 }
 
 // renderButton renders a button as styled text.
@@ -227,8 +725,8 @@ func renderButton(label string, focused bool) string {
 	bg := lipgloss.Color("236")
 	fg := lipgloss.Color("255")
 	if focused {
-		bg = lipgloss.Color("63")  // bright purple/blue for focus
-		fg = lipgloss.Color("255") // white text
+		bg = lipgloss.Color("63")
+		fg = lipgloss.Color("255")
 	}
 	style := lipgloss.NewStyle().
 		Padding(0, 1).
