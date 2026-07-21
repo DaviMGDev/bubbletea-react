@@ -26,24 +26,14 @@ func (a *App) Render(ctx *react.Context) react.Element {
 		react.Box(
 			react.Column(
 				react.Bold("📋 Forms & Controls Demo"),
-
-				react.Spacer(1),
 				react.Text("Tab/arrows to navigate, Enter/Space to activate."),
-				react.Spacer(1),
 
-				// Input
 				react.Bold("Text Input:"),
 				react.Input(name, func(v string) { setName(v) }, "Type here...", 30),
 
-				react.Spacer(1),
-
-				// Checkbox
 				react.Bold("Checkbox:"),
 				react.Checkbox("I agree to the terms", agree, func(v bool) { setAgree(v) }),
 
-				react.Spacer(1),
-
-				// Select
 				react.Bold("Select:"),
 				react.Select(options, choice, func(v string) {
 					for i, o := range options {
@@ -54,12 +44,7 @@ func (a *App) Render(ctx *react.Context) react.Element {
 					}
 				}),
 
-				react.Spacer(1),
-
-				// Divider
 				react.Divider(react.DividerLabel(" Progress ")),
-
-				// Progress
 				react.Progress(progress, 10, react.ProgressWidth(30)),
 				react.Row(
 					react.Button("+1", func() {
@@ -77,12 +62,7 @@ func (a *App) Render(ctx *react.Context) react.Element {
 					react.Button("Reset", func() { setProgress(0) }),
 				),
 
-				react.Spacer(1),
-
-				// Divider
 				react.Divider(react.DividerLabel(" Tabs ")),
-
-				// Tabs
 				react.Tabs([]react.Tab{
 					{Label: "Tab A", Content: react.Text("Content of Tab A")},
 					{Label: "Tab B", Content: react.Column(

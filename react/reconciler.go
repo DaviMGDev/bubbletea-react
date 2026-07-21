@@ -149,7 +149,7 @@ func serializeElement(el Element, width int, interactives *[]interactiveEntry, c
 			style = style.Width(e.Width)
 		}
 		if e.Height > 0 {
-			style = style.Height(e.Height)
+			style = style.MaxHeight(e.Height)
 		}
 		if e.Padding > 0 {
 			style = style.Padding(e.Padding)
